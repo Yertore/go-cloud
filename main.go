@@ -1,10 +1,13 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"log"
 	"net/http"
 	"os"
+	"os/signal"
+	"syscall"
 	"time"
 
 	"github.com/joho/godotenv"
@@ -32,12 +35,56 @@ func main() {
 	mux.HandleFunc("/", rootHandler)
 
 	// Middleware
-	middlewareHandler := loggingMiddleware(mux)
+	handler := loggingMiddleware(mux)
 
-	log.Println("starting on :8080")
-	if err := http.ListenAndServe(":8080", middlewareHandler); err != nil {
-		log.Fatal(err)
+	// Server instance (нужна, чтобы уметь делать Shutdown)
+	//srv.ListenAndServe() — старт
+	//srv.Shutdown(ctx) — мягкая остановка
+	//srv.Close() — жёсткая остановка
+	srv := &http.Server{
+		Addr:    ":8080",
+		Handler: handler,
 	}
+
+	// Запуск сервера в горутине, чтобы main мог ждать сигнал
+	go func() {
+		log.Println("starting on :8080")
+		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			log.Fatalf("server error: %v", err)
+		}
+	}()
+
+	// Ждём SIGINT/SIGTERM
+	stop := make(chan os.Signal, 1)
+	//Это как подписка.
+	signal.Notify(stop, syscall.SIGINT, syscall.SIGTERM)
+	<-stop
+
+	log.Println("shutdown signal received")
+
+	// Даём 5 секунд на завершение текущих запросов
+	//context.Background() — базовый пустой контекст
+	//WithTimeout создаёт новый контекст, который сам отменится через 5 секунд
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	//освобождает внутренние таймеры/ресурсы контекста
+	//хорошая практика: всегда вызывать cancel, даже если таймаут сам сработает
+	defer cancel()
+
+	//srv.Shutdown(ctx) делает “мягкое завершение”:
+	//перестаёт принимать новые соединения
+	//закрывает “listeners”
+	//ждёт пока текущие запросы закончатся
+	//если ctx истёк (5 секунд прошли) — возвращает ошибку
+	if err := srv.Shutdown(ctx); err != nil {
+		log.Printf("graceful shutdown failed: %v", err)
+		//Если Shutdown не успел (таймаут) или завис, ты делаешь “force close”:
+		//немедленно закрывает соединения
+		//текущие запросы могут оборваться
+		//Это “план Б”.
+		_ = srv.Close() // жёстко закрыть, если не успели
+	}
+
+	log.Println("server stopped")
 
 }
 
