@@ -1,0 +1,16 @@
+.git
+.gitignore
+
+bin/
+build/
+dist/
+
+tmp/
+*.log
+
+.vscode/
+.idea/
+
+*.exe
+*.out
+*.test
