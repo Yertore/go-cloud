@@ -7,10 +7,9 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
-
-	"github.com/joho/godotenv"
 )
 
 type rootResponse struct {
@@ -21,10 +20,10 @@ type rootResponse struct {
 func main() {
 	//после установки godotenv - go get github.com/joho/godotenv
 	//загрузка .env
-	err := godotenv.Load()
-	if err != nil {
+	//err := godotenv.Load()
+	/*if err != nil {
 		log.Println("Warning: .env file not found, relying on environment variables")
-	}
+	}*/
 
 	// ---------------- mux — это http.Handler --------------------
 	mux := http.NewServeMux()
@@ -37,18 +36,23 @@ func main() {
 	// Middleware
 	handler := loggingMiddleware(mux)
 
+	port := os.Getenv("PORT")
+	if port == "" {
+		port = "8080"
+	}
+
 	// Server instance (нужна, чтобы уметь делать Shutdown)
 	//srv.ListenAndServe() — старт
 	//srv.Shutdown(ctx) — мягкая остановка
 	//srv.Close() — жёсткая остановка
 	srv := &http.Server{
-		Addr:    ":8080",
+		Addr:    ":" + port,
 		Handler: handler,
 	}
 
 	// Запуск сервера в горутине, чтобы main мог ждать сигнал
 	go func() {
-		log.Println("starting on :8080")
+		log.Printf("starting on :%s", port)
 		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			log.Fatalf("server error: %v", err)
 		}
@@ -93,6 +97,7 @@ func rootHandler(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusMethodNotAllowed)
 		return
 	}
+
 	if r.URL.Path != "/" {
 		http.NotFound(w, r)
 		return
@@ -121,7 +126,7 @@ func healthzHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	w.Header().Set("Content-Type", "text/plain")
+	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 
 	//статус - WriteHeader(code) выставляет HTTP статус-код в ответе.
 	w.WriteHeader(http.StatusOK) //http.StatusOK = 200
@@ -136,11 +141,14 @@ func healthzHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func readyzHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		return
+	}
 
-	time.Sleep(5 * time.Millisecond)
 	//strings.EqualFold делает сравнение без учета регистра (True/TRUE/true).
-	//ready := strings.EqualFold(os.Getenv("APP_READY"), "true")
-	ready := os.Getenv("APP_READY") == "true"
+	ready := strings.EqualFold(os.Getenv("APP_READY"), "true")
+	///ready := os.Getenv("APP_READY") == "true"
 	if !ready {
 		http.Error(w, "not ready", http.StatusServiceUnavailable)
 		return
@@ -159,6 +167,6 @@ func loggingMiddleware(next http.Handler) http.Handler {
 
 		latency := time.Since(start)
 
-		log.Printf("method=%s path=%s latency=%dns", r.Method, r.URL.Path, latency.Microseconds())
+		log.Printf("method=%s path=%s latency=%s", r.Method, r.URL.Path, latency)
 	})
 }
