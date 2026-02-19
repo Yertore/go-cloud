@@ -84,3 +84,37 @@ Shutdown(5s):
 -сначала COPY go.mod go.sum + go mod download
 -потом COPY . .
 -Если ты запомнишь эти 4 шага — ты сможешь писать Dockerfile на автомате.
+
+docker compose down -v
+docker compose up --build
+3. Проверка что таблица создалась
+docker compose exec db psql -U postgres -d go_cloud -c "\d notes"
+
+Должен увидеть:
+Table "public.notes"
+ id         integer
+ text       text
+ created_at timestamp with time zone
+
+Если праблэма:
+1) Посмотри, запускался ли migrate и не упал ли он
+docker compose ps
+И отдельно логи migrate:
+docker compose logs migrate
+
+2) Подними db отдельно и дай ему пару секунд
+docker compose up -d db
+Проверь что db живой:
+docker compose exec db psql -U postgres -d go_cloud -c "SELECT 1;"
+
+3) Запусти миграции вручную (один раз), уже когда db готов
+docker compose run --rm migrate
+
+4) Проверь таблицу
+docker compose exec db psql -U postgres -d go_cloud -c "\d notes"
+
+
+
+docker compose down -v
+docker compose up -d db
+docker compose run --rm migrate

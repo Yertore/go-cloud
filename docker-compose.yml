@@ -11,6 +11,19 @@ services:
     volumes:
       - pgdata:/var/lib/postgresql/data
 
+  migrate:
+    image: migrate/migrate
+    container_name: go-cloud-migrate
+    depends_on:
+      - db
+    volumes:
+      - ./migrations:/migrations:ro
+    command: [
+      "-path", "/migrations",
+      "-database", "postgres://postgres:postgres@db:5432/go_cloud?sslmode=disable",
+      "up"
+    ]
+  
   api:
     build: .
     image: go-cloud:1
