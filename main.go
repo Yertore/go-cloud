@@ -10,6 +10,8 @@ import (
 	"strings"
 	"syscall"
 	"time"
+
+	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 type rootResponse struct {
@@ -25,6 +27,18 @@ func main() {
 		log.Println("Warning: .env file not found, relying on environment variables")
 	}*/
 
+	dbURL := os.Getenv("DATABASE_URL")
+	if dbURL == "" {
+		log.Fatal("DATABASE_URL is required")
+	}
+
+	dbpool, err := pgxpool.New(context.Background(), dbURL)
+	if err != nil {
+		log.Fatalf("cannot connect to db: %v", err)
+	}
+
+	defer dbpool.Close()
+
 	// ---------------- mux — это http.Handler --------------------
 	mux := http.NewServeMux()
 
@@ -32,6 +46,7 @@ func main() {
 	mux.HandleFunc("/healthz", healthzHandler)
 	mux.HandleFunc("/readyz", readyzHandler)
 	mux.HandleFunc("/", rootHandler)
+	mux.HandleFunc("/db/ping", dbPingHandler(dbpool))
 
 	// Middleware
 	handler := loggingMiddleware(mux)
@@ -157,6 +172,27 @@ func readyzHandler(w http.ResponseWriter, r *http.Request) {
 	if _, err := w.Write([]byte("ok")); err != nil {
 		log.Println("write failed:", err)
 	}
+}
+
+func dbPingHandler(db *pgxpool.Pool) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			w.WriteHeader(http.StatusMethodNotAllowed)
+			return
+		}
+
+		var result int
+		err := db.QueryRow(r.Context(), "SELECT 1").Scan(&result)
+		if err != nil {
+			log.Printf("db error: %v", err)
+			http.Error(w, "db ping failed", http.StatusInternalServerError)
+			return
+		}
+
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte("OK"))
+	}
+
 }
 
 func loggingMiddleware(next http.Handler) http.Handler {
